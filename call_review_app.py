@@ -703,7 +703,7 @@ def run_qa_scoring(transcript: str, rubric_text: str) -> dict | None:
 
     try:
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content},
