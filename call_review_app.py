@@ -671,14 +671,13 @@ def parse_llm_json(raw_text: str) -> dict | None:
 
 
 def run_qa_scoring(transcript: str, rubric_text: str) -> dict | None:
-    groq_key = os.getenv("GROQ_API_KEY") or st.session_state.get("GROQ_API_KEY")
+    groq_key = os.getenv("GROQ_API_KEY")
     if not groq_key:
-        st.error("GROQ_API_KEY is missing. Configure it in your environment or sidebar configuration.")
+        st.error("GROQ_API_KEY environment configuration is missing. Add it to your Streamlit Cloud App Secrets setup.")
         return None
 
     client = Groq(api_key=groq_key)
     
-    # Adaptive system prompt instructions that conform precisely to whatever scoring guidelines are provided
     system_prompt = (
         "You are an expert operational Quality Auditor. "
         "Analyze the provided call transcript and evaluate performance based precisely on the parameters, definitions, "
@@ -719,7 +718,6 @@ def run_qa_scoring(transcript: str, rubric_text: str) -> dict | None:
 
 
 def _render_rating_block(rating_data: dict):
-    # Resolve overall score / quality rating seamlessly across schemas
     overall = (
         rating_data.get("overall_rating") 
         or rating_data.get("quality_rating") 
@@ -728,10 +726,8 @@ def _render_rating_block(rating_data: dict):
     )
     st.markdown(f"#### Performance Rating Score: **{overall}**")
 
-    # Handle operational strengths mapping dynamically
     strength_text = rating_data.get("top_strength") or "Review evaluation markers for details."
     
-    # Normalize improvements whether returned as a string text block or individual bullet points array
     improvements = rating_data.get("top_improvement_area")
     if not improvements and "top_3_improvements" in rating_data:
         imps = rating_data["top_3_improvements"]
@@ -754,10 +750,8 @@ def _render_rating_block(rating_data: dict):
 
     st.markdown("<div style='margin-top:15px;'></div>", unsafe_allow_html=True)
 
-    # Dynamic Parser Normalization Block
     eval_list = rating_data.get("parameters_evaluated")
     
-    # Schema Route A: Handle Custom Structured Rubrics (e.g., Reliable Communication Rubric format)
     if not eval_list and "scores" in rating_data:
         eval_list = []
         for item in rating_data["scores"]:
@@ -772,7 +766,6 @@ def _render_rating_block(rating_data: dict):
                 "notes": item.get("notes", "")
             })
 
-    # Schema Route B: Handle Legacy Scorecards
     if not eval_list and "criteria" in rating_data:
         eval_list = []
         for item in rating_data["criteria"]:
@@ -786,7 +779,6 @@ def _render_rating_block(rating_data: dict):
                 "notes": item.get("notes", "")
             })
 
-    # Dynamic interface generator loop
     if eval_list:
         for item in eval_list:
             p_name = item.get("id_or_name") or "Unlabeled Parameter"
@@ -820,7 +812,16 @@ def main():
     _load_dotenv(SCRIPT_DIR / ".env")
     init_page_styles()
 
-    # Fixed App Workspace Branding
+    # SAFELY Synchronize Streamlit Secrets to system environment for cloud deployment
+    try:
+        for secure_key in ["GROQ_API_KEY", "PYANNOTE_API_KEY"]:
+            if secure_key in st.secrets and not os.getenv(secure_key):
+                os.environ[secure_key] = st.secrets[secure_key]
+    except Exception:
+        # Silently fail if running locally without a secrets.toml file
+        # The application will fallback to the keys loaded from your local .env file instead
+        pass
+
     st.markdown('<div class="brand-header">Reliable Communication</div>', unsafe_allow_html=True)
     st.markdown('<div class="brand-sub">Direct Sales & Call Operations — QA Performance Evaluation Desk</div>', unsafe_allow_html=True)
 
@@ -831,28 +832,13 @@ def main():
     if "tvs_rating" not in st.session_state:
         st.session_state.tvs_rating = None
 
-    # Sidebar Component Management Dashboard
     with st.sidebar:
-        st.subheader("🔑 Authentication Details")
-        groq_env = os.getenv("GROQ_API_KEY", "")
-        if not groq_env:
-            groq_input = st.text_input("Groq API Key", type="password")
-            if groq_input:
-                st.session_state["GROQ_API_KEY"] = groq_input
-
-        pyannote_env = os.getenv("PYANNOTE_API_KEY", "")
-        if not pyannote_env:
-            pyannote_input = st.text_input("Pyannote API Key", type="password")
-            if pyannote_input:
-                st.session_state["PYANNOTE_API_KEY"] = pyannote_input
-
         # Media Intake Pipeline 
-        st.markdown("<hr style='margin:15px 0; border-color:#2B4C7E;'/>", unsafe_allow_html=True)
         st.subheader("🎵 Media Intake Pipeline")
         audio_file = st.file_uploader("Upload Call Audio/Video Recording", type=["mp3", "wav", "m4a", "mp4"])
         process_btn = st.button("Process & Transcribe Audio", disabled=audio_file is None, use_container_width=True)
 
-        # Custom Quality Rubric situated perfectly underneath Media Intake panel
+        # Custom Quality Rubric Component
         st.markdown("<hr style='margin:15px 0; border-color:#2B4C7E;'/>", unsafe_allow_html=True)
         st.subheader("📑 Custom Quality Rubric")
         uploaded_rubric = st.file_uploader(
@@ -869,7 +855,6 @@ def main():
             type="primary"
         )
 
-    # Core Logic Pipeline Hook Execution 
     if process_btn and audio_file:
         file_suffix = Path(audio_file.name).suffix.lower()
         with st.spinner("Processing timeline transcription alignments via pipeline..."):
@@ -878,7 +863,6 @@ def main():
                     tmp.write(audio_file.read())
                     tmp_path = Path(tmp.name)
 
-                # Automated MP4 to MP3 Extraction Block
                 if file_suffix == ".mp4":
                     st.info("Converting uploaded MP4 container to native MP3 format...")
                     try:
@@ -892,14 +876,18 @@ def main():
                             pass
                         tmp_path = converted_path
                     except Exception as conv_err:
-                        st.error("Audio conversion failed. Please verify 'pydub' and 'ffmpeg' are configured on the system host.")
+                        st.error("Audio conversion failed. Verify 'pydub' and 'ffmpeg' are configured on the system host.")
                         raise conv_err
+
+                if not os.getenv("PYANNOTE_API_KEY") or not os.getenv("GROQ_API_KEY"):
+                    st.error("Missing required pipeline keys (Groq/Pyannote). Please check your background configuration setup.")
+                    return
 
                 result = process_call_recording(tmp_path)
                 
                 st.session_state.aligned_text = result.get("text", "")
                 st.session_state.english_translation = result.get("english_translation", "")
-                st.session_state.tvs_rating = None  # Reset historical reviews
+                st.session_state.tvs_rating = None
                 st.success("Audio analysis pipeline finished successfully!")
                 
                 try:
@@ -920,7 +908,6 @@ def main():
                     st.session_state.tvs_rating = scores
                     st.success("Audit verification completed!")
 
-    # Layout Output Panels
     if st.session_state.aligned_text:
         col_transcript, col_scorecard = st.columns([1, 1], gap="large")
 
@@ -953,7 +940,6 @@ def main():
                 with st.expander("Raw Structural Model Output Data (JSON)"):
                     st.code(json.dumps(st.session_state.tvs_rating, ensure_ascii=False, indent=2), language="json")
     else:
-        # Landing dashboard workspace
         st.markdown("""
         <div style='background-color: #FFFFFF; padding: 35px; border-radius: 8px; border: 1px solid #E2E8F0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.03); margin-top: 5px;'>
             <h3 style='color: #0F294A; margin-top: 0; font-weight: 700; font-size: 1.4rem;'>Quality Assurance Automated Workspace</h3>
